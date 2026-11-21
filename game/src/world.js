@@ -1,94 +1,157 @@
-// The level map: tiles, collision, line of sight and hiding cover.
-// Walls and crates block movement and sight; bushes hide the player but
-// let everyone walk through them. Scrolls and the exit are pickups.
+// Nightshade — Shadow Courier: the tile world. Parses a level's map strings,
+// answers "can I stand here?", line of sight, and breadth-first paths for
+// click-to-move. Rows shorter than the widest row are padded with walls.
 
-import { TILE } from './config.js';
+import { TILE, COLS, ROWS } from './config.js';
 
-export function buildWorld(level) {
-  const rows = level.map;
-  const height = rows.length;
-  const width = Math.max(...rows.map((r) => r.length));
-  const grid = [];
-  const scrolls = [];
-  let playerStart = { x: TILE * 1.5, y: TILE * 1.5 };
-  let exit = { x: TILE * 29.5, y: TILE * 9.5 };
-
-  for (let y = 0; y < height; y++) {
-    grid.push([]);
-    for (let x = 0; x < width; x++) {
-      const ch = rows[y][x] || '#';
-      grid[y].push(ch);
-      const cx = (x + 0.5) * TILE;
-      const cy = (y + 0.5) * TILE;
-      if (ch === 'P') playerStart = { x: cx, y: cy };
-      if (ch === 'E') exit = { x: cx, y: cy };
-      if (ch === 'S') scrolls.push({ x: cx, y: cy, taken: false, bob: 0 });
+export class World {
+  constructor(levelDef) {
+    this.levelDef = levelDef;
+    const rows = levelDef.map;
+    this.width = Math.max(COLS, ...rows.map((r) => r.length));
+    this.height = Math.max(ROWS, rows.length);
+    this.grid = [];
+    this.scrolls = [];
+    this.exit = null;
+    this.playerStart = { x: TILE * 2 + TILE / 2, y: TILE * 2 + TILE / 2 };
+    for (let ty = 0; ty < this.height; ty++) {
+      const row = (rows[ty] ?? '').padEnd(this.width, '#');
+      const cells = [];
+      for (let tx = 0; tx < this.width; tx++) {
+        const ch = row[tx] ?? '#';
+        cells.push(ch);
+        if (ch === 'P') {
+          this.playerStart = { x: tx * TILE + TILE / 2, y: ty * TILE + TILE / 2 };
+          cells[tx] = '.';
+        } else if (ch === 'S') {
+          this.scrolls.push({ tx, ty, x: tx * TILE + TILE / 2, y: ty * TILE + TILE / 2, taken: false });
+          cells[tx] = '.';
+        } else if (ch === 'E') {
+          this.exit = { tx, ty, x: tx * TILE + TILE / 2, y: ty * TILE + TILE / 2 };
+          cells[tx] = '.';
+        }
+      }
+      this.grid.push(cells);
     }
+    this.scrollsTotal = this.scrolls.length;
   }
-  return { grid, width, height, scrolls, playerStart, exit };
-}
 
-export function tileAt(world, tx, ty) {
-  if (tx < 0 || ty < 0 || tx >= world.width || ty >= world.height) return '#';
-  return world.grid[ty][tx];
-}
-
-export function isSolidTile(ch) {
-  return ch === '#' || ch === 'C';
-}
-
-export function isBushTile(ch) {
-  return ch === 'B';
-}
-
-// True when the tile at pixel (px, py) blocks movement.
-export function solidAt(world, px, py) {
-  return isSolidTile(tileAt(world, Math.floor(px / TILE), Math.floor(py / TILE)));
-}
-
-// Circle-vs-tiles collision: slide along walls instead of sticking.
-export function moveCircle(world, pos, dx, dy, radius) {
-  const next = { x: pos.x + dx, y: pos.y + dy };
-  if (!hitsSolid(world, next.x, pos.y, radius)) pos.x = next.x;
-  if (!hitsSolid(world, pos.x, next.y, radius)) pos.y = next.y;
-  return pos;
-}
-
-function hitsSolid(world, x, y, radius) {
-  return (
-    solidAt(world, x - radius, y - radius) ||
-    solidAt(world, x + radius, y - radius) ||
-    solidAt(world, x - radius, y + radius) ||
-    solidAt(world, x + radius, y + radius) ||
-    solidAt(world, x, y - radius) ||
-    solidAt(world, x, y + radius) ||
-    solidAt(world, x - radius, y) ||
-    solidAt(world, x + radius, y)
-  );
-}
-
-// Line of sight between two points: stepped sampling, blocked by walls
-// and crates. Bushes never block sight — they hide, they do not cover.
-export function hasLineOfSight(world, ax, ay, bx, by) {
-  const dx = bx - ax;
-  const dy = by - ay;
-  const dist = Math.hypot(dx, dy);
-  const steps = Math.max(1, Math.ceil(dist / (TILE / 4)));
-  for (let i = 1; i < steps; i++) {
-    const t = i / steps;
-    if (solidAt(world, ax + dx * t, ay + dy * t)) return false;
+  tileAt(tx, ty) {
+    if (tx < 0 || ty < 0 || tx >= this.width || ty >= this.height) return '#';
+    return this.grid[ty][tx];
   }
-  return true;
-}
 
-// Is the player standing in a bush right now?
-export function inBush(world, x, y) {
-  return isBushTile(tileAt(world, Math.floor(x / TILE), Math.floor(y / TILE)));
-}
+  isSolidTile(tx, ty) {
+    const ch = this.tileAt(tx, ty);
+    return ch === '#' || ch === 'C';
+  }
 
-// Is the player standing on the exit tile?
-export function onExit(world, x, y) {
-  const tx = Math.floor(x / TILE);
-  const ty = Math.floor(y / TILE);
-  return tileAt(world, tx, ty) === 'E';
+  isBushTile(tx, ty) {
+    return this.tileAt(tx, ty) === 'B';
+  }
+
+  isSolidAtPx(x, y) {
+    return this.isSolidTile(Math.floor(x / TILE), Math.floor(y / TILE));
+  }
+
+  isBushAtPx(x, y) {
+    return this.isBushTile(Math.floor(x / TILE), Math.floor(y / TILE));
+  }
+
+  // Can a circle of radius r stand centred at (x, y) without overlapping a
+  // solid tile? Checks every tile the circle's bounding box touches.
+  canStand(x, y, r) {
+    const x0 = Math.floor((x - r) / TILE);
+    const x1 = Math.floor((x + r) / TILE);
+    const y0 = Math.floor((y - r) / TILE);
+    const y1 = Math.floor((y + r) / TILE);
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        if (!this.isSolidTile(tx, ty)) continue;
+        const rx = Math.max(tx * TILE, Math.min(x, tx * TILE + TILE));
+        const ry = Math.max(ty * TILE, Math.min(y, ty * TILE + TILE));
+        const dx = x - rx;
+        const dy = y - ry;
+        if (dx * dx + dy * dy < r * r) return false;
+      }
+    }
+    return true;
+  }
+
+  // Straight-line sight between two pixel points, sampled every 6 pixels.
+  // Walls and crates block sight; bushes do not.
+  lineOfSight(x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const dist = Math.hypot(dx, dy);
+    const steps = Math.max(1, Math.ceil(dist / 6));
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      if (this.isSolidAtPx(x1 + dx * t, y1 + dy * t)) return false;
+    }
+    return true;
+  }
+
+  // Nearest non-solid tile to (tx, ty), spiralling outward. Guards use it so
+  // a waypoint that lands on a wall still gives a walkable patrol point.
+  nearestFloor(tx, ty) {
+    for (let radius = 0; radius <= 6; radius++) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+          if (!this.isSolidTile(tx + dx, ty + dy)) return { tx: tx + dx, ty: ty + dy };
+        }
+      }
+    }
+    return { tx, ty };
+  }
+
+  tileCenter(tx, ty) {
+    return { x: tx * TILE + TILE / 2, y: ty * TILE + TILE / 2 };
+  }
+
+  // Breadth-first path over walkable tiles, returned as pixel waypoints
+  // (tile centres). Null when the target tile cannot be reached.
+  findPath(fromX, fromY, toX, toY) {
+    const sx = Math.floor(fromX / TILE);
+    const sy = Math.floor(fromY / TILE);
+    const tx = Math.floor(toX / TILE);
+    const ty = Math.floor(toY / TILE);
+    if (this.isSolidTile(tx, ty) || this.isSolidTile(sx, sy)) return null;
+    const key = (x, y) => y * this.width + x;
+    const prev = new Map();
+    const queue = [[sx, sy]];
+    prev.set(key(sx, sy), null);
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    while (queue.length > 0) {
+      const [cx, cy] = queue.shift();
+      if (cx === tx && cy === ty) break;
+      for (const [dx, dy] of dirs) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (this.isSolidTile(nx, ny)) continue;
+        const k = key(nx, ny);
+        if (prev.has(k)) continue;
+        prev.set(k, [cx, cy]);
+        queue.push([nx, ny]);
+      }
+    }
+    if (!prev.has(key(tx, ty))) return null;
+    const points = [];
+    let cur = [tx, ty];
+    while (cur !== null) {
+      points.push(this.tileCenter(cur[0], cur[1]));
+      cur = prev.get(key(cur[0], cur[1]));
+    }
+    points.reverse();
+    return points;
+  }
+
+  scrollsLeft() {
+    return this.scrolls.filter((s) => !s.taken).length;
+  }
+
+  resetScrolls() {
+    for (const s of this.scrolls) s.taken = false;
+  }
 }

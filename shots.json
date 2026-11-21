@@ -1,1 +1,1 @@
-[{"name":"1-play.jpg","query":"?shot=play&seed=7"},{"name":"2-start.jpg","query":"?shot=start&seed=7"},{"name":"3-alert.jpg","query":"?shot=alert&seed=7"},{"name":"4-end.jpg","query":"?shot=end&seed=7"}]
+{"shots":[{"file":"1-play.jpg","name":"play","url":"/?shot=play"},{"file":"2-start.jpg","name":"start","url":"/?shot=start"},{"file":"3-alert.jpg","name":"alert","url":"/?shot=alert"},{"file":"4-end.jpg","name":"end","url":"/?shot=end"}]}

@@ -1,8 +1,7 @@
-// Seeded random numbers, so a screenshot state can be replayed exactly.
-// A small mulberry32 generator: deterministic for a given seed, good
-// enough for guard jitter and for the decorative fireflies on the title.
+// Nightshade — Shadow Courier: a tiny seeded random generator so screenshot
+// poses and guard wander choices are deterministic.
 
-export function makeRandom(seed) {
+export function makeRng(seed) {
   let a = seed >>> 0;
   return function next() {
     a |= 0;
@@ -13,19 +12,10 @@ export function makeRandom(seed) {
   };
 }
 
-// Pick an integer in [min, max] from a generator made by makeRandom.
-export function randomInt(rng, min, max) {
-  return min + Math.floor(rng() * (max - min + 1));
+export function rngRange(rng, min, max) {
+  return min + rng() * (max - min);
 }
 
-// Shuffle a copy of an array with a seeded generator.
-export function shuffle(rng, list) {
-  const out = list.slice();
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    const tmp = out[i];
-    out[i] = out[j];
-    out[j] = tmp;
-  }
-  return out;
+export function rngPick(rng, list) {
+  return list[Math.floor(rng() * list.length) % list.length];
 }

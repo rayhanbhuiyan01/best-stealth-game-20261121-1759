@@ -1,91 +1,76 @@
-// Keyboard and mouse input for Nightshade.
-// WASD or arrows to move, Shift to sneak, P pause, R restart, M mute,
-// Enter to start / continue. Clicking the floor sets a move target.
-// The canvas keeps focus so keys work the moment the page opens.
+// Nightshade — Shadow Courier: keyboard and mouse state.
+// Keys are tracked by e.code; wasPressed() is true only on the frame the key
+// went down. Clicks are queued as canvas pixel positions for click-to-move.
 
-export function makeInput(canvas) {
-  const keys = {
-    up: false,
-    down: false,
-    left: false,
-    right: false,
-    sneak: false,
-  };
-  const pressed = new Set(); // edge-triggered keys, consumed by main.js
-  let clickTarget = null; // {x, y} in canvas pixels, or null
-  let muted = false;
-
-  const KEYMAP = {
-    ArrowUp: 'up',
-    KeyW: 'up',
-    ArrowDown: 'down',
-    KeyS: 'down',
-    ArrowLeft: 'left',
-    KeyA: 'left',
-    ArrowRight: 'right',
-    KeyD: 'right',
-    ShiftLeft: 'sneak',
-    ShiftRight: 'sneak',
-  };
-
-  function onKeyDown(e) {
-    if (e.code === 'KeyM') {
-      muted = !muted;
-      pressed.add('mute');
-      e.preventDefault();
-      return;
-    }
-    const name = KEYMAP[e.code];
-    if (name) {
-      keys[name] = true;
-      e.preventDefault();
-      return;
-    }
-    if (['Enter', 'Space', 'KeyP', 'KeyR', 'KeyH'].includes(e.code)) {
-      pressed.add(e.code);
-      e.preventDefault();
-    }
+export class Input {
+  constructor() {
+    this.down = new Set();
+    this.pressed = new Set();
+    this.clickQueue = [];
+    this._onKeyDown = null;
+    this._onKeyUp = null;
+    this._onMouseDown = null;
   }
 
-  function onKeyUp(e) {
-    const name = KEYMAP[e.code];
-    if (name) keys[name] = false;
-  }
-
-  function onMouseDown(e) {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    clickTarget = {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
-    };
-  }
-
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
-  canvas.addEventListener('mousedown', onMouseDown);
-  canvas.setAttribute('tabindex', '0');
-  canvas.focus();
-
-  return {
-    keys,
-    // True once for each press of the named code since the last check.
-    wasPressed(code) {
-      if (pressed.has(code)) {
-        pressed.delete(code);
-        return true;
+  attach(canvas) {
+    this._onKeyDown = (e) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+        e.preventDefault();
       }
-      return false;
-    },
-    // The latest click target, or null when there is none / it was read.
-    takeClick() {
-      const t = clickTarget;
-      clickTarget = null;
-      return t;
-    },
-    isMuted() {
-      return muted;
-    },
-  };
+      if (!this.down.has(e.code)) this.pressed.add(e.code);
+      this.down.add(e.code);
+    };
+    this._onKeyUp = (e) => {
+      this.down.delete(e.code);
+    };
+    this._onMouseDown = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      this.clickQueue.push({
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY,
+      });
+    };
+    window.addEventListener('keydown', this._onKeyDown);
+    window.addEventListener('keyup', this._onKeyUp);
+    canvas.addEventListener('mousedown', this._onMouseDown);
+  }
+
+  isDown(code) {
+    return this.down.has(code);
+  }
+
+  wasPressed(code) {
+    return this.pressed.has(code);
+  }
+
+  anyWasPressed(codes) {
+    return codes.some((c) => this.pressed.has(c));
+  }
+
+  // Movement keys held right now, as a unit-ish vector.
+  moveVector() {
+    let x = 0;
+    let y = 0;
+    if (this.down.has('KeyA') || this.down.has('ArrowLeft')) x -= 1;
+    if (this.down.has('KeyD') || this.down.has('ArrowRight')) x += 1;
+    if (this.down.has('KeyW') || this.down.has('ArrowUp')) y -= 1;
+    if (this.down.has('KeyS') || this.down.has('ArrowDown')) y += 1;
+    if (x !== 0 && y !== 0) {
+      const inv = 1 / Math.hypot(x, y);
+      x *= inv;
+      y *= inv;
+    }
+    return { x, y };
+  }
+
+  takeClick() {
+    return this.clickQueue.shift() ?? null;
+  }
+
+  // Called at the end of each frame: edge presses live for one frame only.
+  endFrame() {
+    this.pressed.clear();
+  }
 }

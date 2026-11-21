@@ -1,386 +1,423 @@
-// All drawing for Nightshade: the level, the vision cones, the courier,
-// the guards, the HUD and every screen. Everything is drawn in code on a
-// 2D canvas — no images, no fonts loaded from the network.
+// Nightshade — Shadow Courier: every pixel the game draws. The world is a
+// night-blue tile map lit by lantern cones; the courier is a hooded figure,
+// guards are lantern-bearers with a "?" when suspicious and a "!" in chase.
 
-import { TILE, VIEW_W, VIEW_H, GUARD } from './config.js';
-import { tileAt, isSolidTile } from './world.js';
+import { TILE, COLS, ROWS, VIEW_W, VIEW_H } from './config.js';
 
-// Cast one ray from (x, y) along angle until it hits a wall or maxDist.
-function rayDistance(world, x, y, angle, maxDist) {
-  const step = 8;
-  const dx = Math.cos(angle) * step;
-  const dy = Math.sin(angle) * step;
-  let d = 0;
-  while (d < maxDist) {
-    const px = x + dx * (d / step);
-    const py = y + dy * (d / step);
-    if (isSolidTile(tileAt(world, Math.floor(px / TILE), Math.floor(py / TILE)))) return d;
-    d += step;
-  }
-  return maxDist;
-}
+const FLOOR_A = '#1b2233';
+const FLOOR_B = '#1d2536';
+const WALL = '#0d1120';
+const WALL_TOP = '#2c3550';
 
-// The guard's vision cone, clipped by walls ray by ray so it hugs cover.
-function drawVisionCone(ctx, world, guard) {
-  const rays = 26;
-  const half = GUARD.viewAngle;
-  const color =
-    guard.state === 'chase' ? '255,70,70' : guard.state === 'suspicious' ? '255,150,60' : '255,205,80';
-  const alpha = guard.state === 'chase' ? 0.34 : 0.22;
+function roundedRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
-  ctx.moveTo(guard.x, guard.y);
-  for (let i = 0; i <= rays; i++) {
-    const a = guard.facing - half + (2 * half * i) / rays;
-    const d = rayDistance(world, guard.x, guard.y, a, GUARD.viewDistance);
-    ctx.lineTo(guard.x + Math.cos(a) * d, guard.y + Math.sin(a) * d);
-  }
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
-  ctx.fillStyle = `rgba(${color},${alpha})`;
-  ctx.fill();
-  ctx.strokeStyle = `rgba(${color},0.5)`;
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
 }
 
-function drawFloor(ctx, world) {
-  for (let ty = 0; ty < world.height; ty++) {
-    for (let tx = 0; tx < world.width; tx++) {
-      const ch = world.grid[ty][tx];
-      const x = tx * TILE;
-      const y = ty * TILE;
+export function drawWorld(ctx, game) {
+  const { world } = game;
+  for (let ty = 0; ty < ROWS; ty++) {
+    for (let tx = 0; tx < COLS; tx++) {
+      const ch = world.tileAt(tx, ty);
+      const px = tx * TILE;
+      const py = ty * TILE;
       if (ch === '#') {
-        ctx.fillStyle = '#232a3d';
-        ctx.fillRect(x, y, TILE, TILE);
-        ctx.fillStyle = '#2e3750';
-        ctx.fillRect(x + 3, y + 3, TILE - 6, TILE - 6);
-        ctx.fillStyle = '#1a2030';
-        ctx.fillRect(x, y + TILE - 6, TILE, 6);
+        ctx.fillStyle = WALL;
+        ctx.fillRect(px, py, TILE, TILE);
+        ctx.fillStyle = WALL_TOP;
+        ctx.fillRect(px, py, TILE, 4);
+        ctx.fillStyle = 'rgba(255,255,255,0.04)';
+        ctx.fillRect(px + 3, py + 6, TILE - 6, 2);
       } else {
-        const shade = (tx + ty) % 2 === 0 ? '#141a29' : '#121724';
-        ctx.fillStyle = shade;
-        ctx.fillRect(x, y, TILE, TILE);
-      }
-      if (ch === 'B') {
-        // Bush: a dark green thicket the courier can hide inside.
-        ctx.fillStyle = '#17351f';
-        ctx.beginPath();
-        ctx.arc(x + 12, y + 14, 11, 0, Math.PI * 2);
-        ctx.arc(x + 28, y + 10, 12, 0, Math.PI * 2);
-        ctx.arc(x + 20, y + 28, 12, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#2c5a34';
-        ctx.beginPath();
-        ctx.arc(x + 12, y + 14, 6, 0, Math.PI * 2);
-        ctx.arc(x + 28, y + 10, 6, 0, Math.PI * 2);
-        ctx.arc(x + 20, y + 28, 6, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      if (ch === 'C') {
-        // Crate: wooden cover that blocks sight and movement.
-        ctx.fillStyle = '#5a4126';
-        ctx.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
-        ctx.strokeStyle = '#7a5a35';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x + 4, y + 4, TILE - 8, TILE - 8);
-        ctx.beginPath();
-        ctx.moveTo(x + 4, y + 4);
-        ctx.lineTo(x + TILE - 4, y + TILE - 4);
-        ctx.moveTo(x + TILE - 4, y + 4);
-        ctx.lineTo(x + 4, y + TILE - 4);
-        ctx.stroke();
+        ctx.fillStyle = (tx + ty) % 2 === 0 ? FLOOR_A : FLOOR_B;
+        ctx.fillRect(px, py, TILE, TILE);
+        if (ch === 'B') drawBush(ctx, px, py);
+        if (ch === 'C') drawCrate(ctx, px, py);
       }
     }
   }
 }
 
-function drawScroll(ctx, scroll, time) {
-  if (scroll.taken) return;
-  const bob = Math.sin(time * 3 + scroll.bob) * 3;
-  const glow = 0.5 + 0.3 * Math.sin(time * 4 + scroll.bob);
-  ctx.save();
-  ctx.shadowColor = `rgba(255,220,120,${glow})`;
-  ctx.shadowBlur = 18;
-  ctx.translate(scroll.x, scroll.y + bob);
-  ctx.rotate(0.5);
-  ctx.fillStyle = '#f2e3b3';
-  ctx.fillRect(-9, -12, 18, 24);
-  ctx.strokeStyle = '#b3924e';
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(-9, -12, 18, 24);
-  ctx.strokeStyle = '#8a6d2f';
+function drawBush(ctx, px, py) {
+  ctx.fillStyle = '#14301f';
   ctx.beginPath();
-  ctx.moveTo(-5, -5);
-  ctx.lineTo(5, -5);
-  ctx.moveTo(-5, 0);
-  ctx.lineTo(5, 0);
-  ctx.moveTo(-5, 5);
-  ctx.lineTo(2, 5);
-  ctx.stroke();
-  ctx.restore();
+  ctx.arc(px + 12, py + 14, 11, 0, Math.PI * 2);
+  ctx.arc(px + 26, py + 12, 12, 0, Math.PI * 2);
+  ctx.arc(px + 19, py + 26, 12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1e4d2c';
+  ctx.beginPath();
+  ctx.arc(px + 13, py + 13, 6, 0, Math.PI * 2);
+  ctx.arc(px + 26, py + 13, 6, 0, Math.PI * 2);
+  ctx.arc(px + 19, py + 25, 6, 0, Math.PI * 2);
+  ctx.fill();
 }
 
-function drawExit(ctx, world, open, time) {
-  const { x, y } = world.exit;
-  const pulse = 0.5 + 0.3 * Math.sin(time * 3);
+function drawCrate(ctx, px, py) {
+  ctx.fillStyle = '#5a3d1e';
+  ctx.fillRect(px + 4, py + 4, TILE - 8, TILE - 8);
+  ctx.strokeStyle = '#7d5a2e';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(px + 4, py + 4, TILE - 8, TILE - 8);
+  ctx.beginPath();
+  ctx.moveTo(px + 4, py + 4);
+  ctx.lineTo(px + TILE - 4, py + TILE - 4);
+  ctx.moveTo(px + TILE - 4, py + 4);
+  ctx.lineTo(px + 4, py + TILE - 4);
+  ctx.stroke();
+}
+
+function drawScroll(ctx, s, time) {
+  const bob = Math.sin(time * 3 + s.tx) * 2;
+  const glow = 0.5 + Math.sin(time * 4) * 0.2;
   ctx.save();
-  ctx.translate(x, y);
-  ctx.fillStyle = '#0c1f16';
-  ctx.fillRect(-17, -19, 34, 38);
-  ctx.strokeStyle = open ? `rgba(80,255,140,${0.6 + pulse * 0.4})` : '#5a6b62';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(-17, -19, 34, 38);
+  ctx.shadowColor = `rgba(255, 214, 120, ${glow})`;
+  ctx.shadowBlur = 14;
+  ctx.fillStyle = '#f2d8a0';
+  roundedRect(ctx, s.x - 9, s.y - 12 + bob, 18, 24, 4);
+  ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = '#8a6b2f';
+  ctx.fillRect(s.x - 11, s.y - 13 + bob, 22, 4);
+  ctx.fillRect(s.x - 11, s.y + 9 + bob, 22, 4);
+  ctx.strokeStyle = '#6b4d1f';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(s.x - 5, s.y - 4 + bob);
+  ctx.lineTo(s.x + 5, s.y - 4 + bob);
+  ctx.moveTo(s.x - 5, s.y + 1 + bob);
+  ctx.lineTo(s.x + 5, s.y + 1 + bob);
+  ctx.stroke();
+}
+
+function drawExit(ctx, world, time) {
+  const e = world.exit;
+  if (!e) return;
+  const open = world.scrollsLeft() === 0;
+  ctx.save();
   if (open) {
-    ctx.shadowColor = 'rgba(80,255,140,0.9)';
-    ctx.shadowBlur = 16;
-    ctx.fillStyle = '#39d67a';
-    ctx.beginPath();
-    ctx.moveTo(0, -12);
-    ctx.lineTo(9, 0);
-    ctx.lineTo(0, 12);
-    ctx.lineTo(-9, 0);
-    ctx.closePath();
-    ctx.fill();
+    ctx.shadowColor = 'rgba(90, 255, 150, 0.9)';
+    ctx.shadowBlur = 22;
+    ctx.fillStyle = '#123524';
   } else {
+    ctx.fillStyle = '#2a1218';
+  }
+  roundedRect(ctx, e.x - 17, e.y - 19, 34, 38, 5);
+  ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = open ? '#5aff96' : '#8a2f3d';
+  ctx.lineWidth = 3;
+  roundedRect(ctx, e.x - 17, e.y - 19, 34, 38, 5);
+  ctx.stroke();
+  if (open) {
+    ctx.fillStyle = '#5aff96';
+    ctx.beginPath();
+    ctx.moveTo(e.x - 7, e.y + 2);
+    ctx.lineTo(e.x, e.y + 9);
+    ctx.lineTo(e.x + 8, e.y - 7);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#5aff96';
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = '#c94b5e';
+    ctx.beginPath();
+    ctx.arc(e.x, e.y - 2, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2a1218';
+    ctx.fillRect(e.x - 2, e.y - 2, 4, 7);
+    ctx.fillStyle = '#ffb3bd';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('LOCKED', e.x, e.y + 30);
+  }
+}
+
+function coneColor(guard) {
+  if (guard.state === 'chase') return 'rgba(255, 60, 60, 0.30)';
+  if (guard.state === 'suspicious' || guard.state === 'search') return 'rgba(255, 165, 40, 0.26)';
+  return 'rgba(255, 214, 110, 0.20)';
+}
+
+export function drawGuards(ctx, game) {
+  for (const g of game.guards) {
+    const poly = g.cone.length > 1 ? g.cone : null;
+    if (poly) {
+      ctx.fillStyle = coneColor(g);
+      ctx.beginPath();
+      ctx.moveTo(poly[0].x, poly[0].y);
+      for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // Lantern glow around the guard.
+    const glow = ctx.createRadialGradient(g.x, g.y, 4, g.x, g.y, 46);
+    glow.addColorStop(0, 'rgba(255, 200, 90, 0.35)');
+    glow.addColorStop(1, 'rgba(255, 200, 90, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(g.x, g.y, 46, 0, Math.PI * 2);
+    ctx.fill();
+    // Body: dark guard with a brass helmet and a lantern in front.
+    ctx.fillStyle = '#3a2f55';
+    ctx.beginPath();
+    ctx.arc(g.x, g.y, 13, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = '#c9a227';
     ctx.beginPath();
-    ctx.arc(0, -2, 6, 0, Math.PI * 2);
+    ctx.arc(g.x, g.y - 3, 7, Math.PI, 0);
     ctx.fill();
-    ctx.fillRect(-2.5, 3, 5, 9);
+    ctx.fillStyle = '#ffe9a8';
+    ctx.beginPath();
+    ctx.arc(g.x + Math.cos(g.angle) * 16, g.y + Math.sin(g.angle) * 16, 4, 0, Math.PI * 2);
+    ctx.fill();
+    // Suspicion meter arc above the guard.
+    if (g.suspicion > 0.05 && g.state !== 'chase') {
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(g.x, g.y - 22, 9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * g.suspicion);
+      ctx.stroke();
+    }
+    if (g.state === 'suspicious' || g.state === 'search') {
+      ctx.fillStyle = '#ffb020';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('?', g.x, g.y - 26);
+    }
+    if (g.state === 'chase') {
+      ctx.fillStyle = '#ff4040';
+      ctx.font = 'bold 22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('!', g.x, g.y - 26);
+    }
   }
-  ctx.restore();
 }
 
-function drawGuard(ctx, guard, time) {
-  const bob = Math.sin(guard.bobPhase) * 1.5;
-  ctx.save();
-  ctx.translate(guard.x, guard.y + bob);
-  // Body: a lantern guard in a rust-red coat.
-  ctx.fillStyle = guard.state === 'chase' ? '#a33327' : '#7d3b2e';
+export function drawPlayer(ctx, game) {
+  const p = game.player;
+  if (game.invulnerable > 0 && Math.floor(game.time * 12) % 2 === 0) return; // blink
+  // Noise ring while running.
+  if (p.noiseRadius() > 4) {
+    ctx.strokeStyle = `rgba(255, 255, 255, ${0.35 * p.noisePulse})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.noiseRadius(), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // Click-to-move path dots.
+  if (p.path) {
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    for (let i = p.pathIndex; i < p.path.length; i++) {
+      ctx.beginPath();
+      ctx.arc(p.path[i].x, p.path[i].y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  // Hooded courier: teal cloak, hood, satchel strap.
+  const crouch = p.sneaking ? 0.85 : 1;
+  ctx.fillStyle = '#0f5b52';
   ctx.beginPath();
-  ctx.arc(0, 0, guard.radius, 0, Math.PI * 2);
+  ctx.ellipse(p.x, p.y, 13, 13 * crouch, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = '#e8c97a';
+  ctx.fillStyle = '#0a3d38';
+  ctx.beginPath();
+  ctx.arc(p.x + Math.cos(p.facing) * 4, p.y + Math.sin(p.facing) * 4, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e8d8a8';
+  ctx.beginPath();
+  ctx.arc(p.x + Math.cos(p.facing) * 7, p.y + Math.sin(p.facing) * 7, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#d9b96a';
   ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(p.x - 8, p.y + 6);
+  ctx.lineTo(p.x + 8, p.y - 6);
   ctx.stroke();
-  // Helmet brim and the direction they face.
-  ctx.fillStyle = '#3a2a1c';
-  ctx.beginPath();
-  ctx.arc(Math.cos(guard.facing) * 6, Math.sin(guard.facing) * 6, 6, 0, Math.PI * 2);
-  ctx.fill();
-  // The lantern: a warm glow swinging ahead of them.
-  const lx = Math.cos(guard.facing) * 20;
-  const ly = Math.sin(guard.facing) * 20;
-  ctx.shadowColor = 'rgba(255,190,90,0.9)';
-  ctx.shadowBlur = 14;
-  ctx.fillStyle = '#ffd27a';
-  ctx.beginPath();
-  ctx.arc(lx, ly, 5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-  // Suspicion arc over the guard's head.
-  if (guard.suspicion > 0.05 && guard.state !== 'chase') {
-    ctx.save();
-    ctx.translate(guard.x, guard.y - 26);
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(-16, -5, 32, 8);
-    ctx.fillStyle = guard.suspicion > 0.6 ? '#ff7a3c' : '#ffd34d';
-    ctx.fillRect(-15, -4, 30 * guard.suspicion, 6);
-    ctx.restore();
-  }
-  if (guard.state === 'chase') {
-    ctx.save();
-    ctx.fillStyle = '#ff5a4d';
-    ctx.font = 'bold 20px sans-serif';
+  if (p.hiddenInBush(game.world)) {
+    ctx.strokeStyle = 'rgba(120, 255, 150, 0.8)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 18, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#7dff9a';
+    ctx.font = 'bold 11px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('!', guard.x, guard.y - 24);
-    ctx.restore();
+    ctx.fillText('HIDDEN', p.x, p.y - 22);
   }
 }
 
-function drawPlayer(ctx, player, time) {
-  const stride = player.moving ? Math.sin(player.stepPhase) * 4 : 0;
-  ctx.save();
-  ctx.translate(player.x, player.y);
-  // Cloak shadow.
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  ctx.beginPath();
-  ctx.ellipse(0, 9, 14, 6, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Hooded courier: deep violet cloak, pale face, dark hood.
-  ctx.fillStyle = player.hidden ? '#3d6b4a' : '#5b4a8a';
-  ctx.beginPath();
-  ctx.arc(0, 0, player.radius, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#c9b8ff';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  ctx.fillStyle = '#241a3a';
-  ctx.beginPath();
-  ctx.arc(Math.cos(player.facing) * 4, Math.sin(player.facing) * 4, 7.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#ffe9c9';
-  ctx.beginPath();
-  ctx.arc(Math.cos(player.facing) * 7, Math.sin(player.facing) * 7, 3.4, 0, Math.PI * 2);
-  ctx.fill();
-  // Feet mid-stride.
-  ctx.fillStyle = '#241a3a';
-  ctx.beginPath();
-  ctx.arc(-6, 10 + stride * 0.4, 3, 0, Math.PI * 2);
-  ctx.arc(6, 10 - stride * 0.4, 3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-  if (player.hidden) {
-    ctx.save();
-    ctx.fillStyle = '#9fe8b0';
-    ctx.font = 'bold 13px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('HIDDEN', player.x, player.y - 22);
-    ctx.restore();
+export function drawParticles(ctx, game) {
+  for (const pt of game.particles) {
+    ctx.globalAlpha = Math.max(0, pt.life / pt.maxLife);
+    ctx.fillStyle = pt.color;
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
+    ctx.fill();
   }
+  ctx.globalAlpha = 1;
 }
 
-function drawNoiseRing(ctx, player, noiseRadius) {
-  if (!noiseRadius) return;
-  ctx.save();
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([6, 8]);
-  ctx.beginPath();
-  ctx.arc(player.x, player.y, noiseRadius, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.restore();
-}
-
-export function drawHUD(ctx, state) {
-  const { level, scrollsGot, scrollsTotal, lives, score, time, alert } = state;
-  ctx.save();
-  ctx.fillStyle = 'rgba(5,8,16,0.78)';
-  ctx.fillRect(0, 0, VIEW_W, 46);
+export function drawHUD(ctx, game) {
+  const level = game.levelDef;
+  ctx.fillStyle = 'rgba(6, 8, 16, 0.82)';
+  ctx.fillRect(0, 0, VIEW_W, 44);
   ctx.fillStyle = '#e8ecf5';
   ctx.font = 'bold 17px sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText(level.name, 16, 29);
-  ctx.font = '16px sans-serif';
-  ctx.fillText(`Scrolls ${scrollsGot}/${scrollsTotal}`, 330, 29);
-  ctx.fillText(`Lives ${'●'.repeat(lives)}${'○'.repeat(Math.max(0, 3 - lives))}`, 480, 29);
-  ctx.fillText(`Score ${score}`, 640, 29);
-  const mins = Math.floor(time / 60);
-  const secs = Math.floor(time % 60);
-  ctx.fillText(`Time ${mins}:${String(secs).padStart(2, '0')}`, 780, 29);
-  // Alert meter on the right.
-  const label = alert === 2 ? 'SPOTTED!' : alert === 1 ? 'SUSPICIOUS' : 'UNSEEN';
-  const color = alert === 2 ? '#ff5a4d' : alert === 1 ? '#ffb03c' : '#39d67a';
-  ctx.fillStyle = color;
-  ctx.font = 'bold 17px sans-serif';
+  ctx.fillText(level.name, 14, 28);
+  ctx.font = '14px sans-serif';
+  ctx.fillStyle = '#9fb0d0';
+  const taken = game.world.scrollsTotal - game.world.scrollsLeft();
+  ctx.fillText(`Scrolls ${taken}/${game.world.scrollsTotal}`, 330, 28);
+  ctx.fillStyle = '#ff6b81';
+  let hearts = '';
+  for (let i = 0; i < game.lives; i++) hearts += '♥ ';
+  ctx.fillText(hearts || '—', 470, 28);
+  ctx.fillStyle = '#ffd66e';
+  ctx.fillText(`Score ${game.score}`, 590, 28);
+  ctx.fillStyle = '#9fb0d0';
+  ctx.fillText(`Time ${formatTime(game.levelTime)}`, 730, 28);
+  const alert = game.alertState();
+  ctx.font = 'bold 15px sans-serif';
   ctx.textAlign = 'right';
-  ctx.fillText(label, VIEW_W - 16, 29);
-  ctx.restore();
+  if (alert === 'SPOTTED') {
+    ctx.fillStyle = '#ff4d4d';
+    ctx.fillText('● SPOTTED — RUN!', VIEW_W - 16, 28);
+  } else if (alert === 'SUSPICIOUS') {
+    ctx.fillStyle = '#ffb020';
+    ctx.fillText('● SUSPICIOUS', VIEW_W - 16, 28);
+  } else {
+    ctx.fillStyle = '#7dff9a';
+    ctx.fillText('● UNSEEN', VIEW_W - 16, 28);
+  }
+  ctx.textAlign = 'left';
+  // Controls reminder along the bottom edge.
+  ctx.fillStyle = 'rgba(6, 8, 16, 0.7)';
+  ctx.fillRect(0, VIEW_H - 26, VIEW_W, 26);
+  ctx.fillStyle = '#8b98b5';
+  ctx.font = '13px sans-serif';
+  ctx.fillText('WASD / arrows move · Shift sneak · Click a tile to walk there · P pause · R restart · M mute', 14, VIEW_H - 8);
 }
 
-function overlayPanel(ctx, title, lines, accent) {
-  ctx.save();
-  ctx.fillStyle = 'rgba(4,6,12,0.72)';
+export function formatTime(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function overlay(ctx, alpha) {
+  ctx.fillStyle = `rgba(4, 6, 14, ${alpha})`;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-  ctx.fillStyle = accent;
-  ctx.font = 'bold 54px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(title, VIEW_W / 2, 300);
-  ctx.fillStyle = '#e8ecf5';
-  ctx.font = '20px sans-serif';
-  lines.forEach((line, i) => {
-    ctx.fillText(line, VIEW_W / 2, 350 + i * 32);
-  });
-  ctx.fillStyle = '#9aa5bd';
-  ctx.font = '17px sans-serif';
-  ctx.fillText('Press Enter to continue', VIEW_W / 2, 350 + lines.length * 32 + 30);
-  ctx.restore();
 }
 
-export function render(ctx, game) {
-  const { world, player, guards, time, phase, level, score, lives, levelTime } = game;
+function centreText(ctx, lines) {
+  let y = 250;
+  for (const line of lines) {
+    ctx.font = line.font;
+    ctx.fillStyle = line.color;
+    ctx.textAlign = 'center';
+    ctx.fillText(line.text, VIEW_W / 2, y);
+    y += line.gap;
+  }
+  ctx.textAlign = 'left';
+}
+
+export function drawTitle(ctx, game) {
+  overlay(ctx, 0.55);
+  centreText(ctx, [
+    { text: 'NIGHTSHADE', font: 'bold 84px Georgia, serif', color: '#e8ecf5', gap: 96 },
+    { text: '— Shadow Courier —', font: 'italic 30px Georgia, serif', color: '#ffd66e', gap: 52 },
+    { text: 'Sneak through guarded halls. Take every scroll. Reach the door unseen.', font: '19px sans-serif', color: '#c6d0e4', gap: 40 },
+    { text: 'WASD or arrows to move · Shift to sneak · Click a tile to walk there', font: '16px sans-serif', color: '#9fb0d0', gap: 34 },
+    { text: 'Bushes hide you · Crates block sight · Running makes noise', font: '16px sans-serif', color: '#9fb0d0', gap: 60 },
+    { text: 'Press Enter to begin', font: 'bold 24px sans-serif', color: '#7dff9a', gap: 40 },
+  ]);
+}
+
+export function drawIntro(ctx, game) {
+  overlay(ctx, 0.6);
+  centreText(ctx, [
+    { text: game.levelDef.name, font: 'bold 52px Georgia, serif', color: '#e8ecf5', gap: 66 },
+    { text: game.levelDef.sub, font: '19px sans-serif', color: '#c6d0e4', gap: 46 },
+    { text: `Collect all ${game.world.scrollsTotal} scrolls, then slip out the exit door.`, font: '18px sans-serif', color: '#ffd66e', gap: 40 },
+    { text: `Guards on patrol: ${game.guards.length} · Lives: ${game.lives}`, font: '16px sans-serif', color: '#9fb0d0', gap: 60 },
+    { text: 'Press Enter to sneak in', font: 'bold 22px sans-serif', color: '#7dff9a', gap: 40 },
+  ]);
+}
+
+export function drawPaused(ctx) {
+  overlay(ctx, 0.65);
+  centreText(ctx, [
+    { text: 'PAUSED', font: 'bold 56px Georgia, serif', color: '#e8ecf5', gap: 70 },
+    { text: 'Press P to keep sneaking', font: '19px sans-serif', color: '#c6d0e4', gap: 40 },
+  ]);
+}
+
+export function drawLevelClear(ctx, game) {
+  overlay(ctx, 0.6);
+  centreText(ctx, [
+    { text: 'LEVEL CLEAR', font: 'bold 60px Georgia, serif', color: '#7dff9a', gap: 76 },
+    { text: game.levelDef.name, font: '26px Georgia, serif', color: '#e8ecf5', gap: 44 },
+    { text: `Scrolls ${game.world.scrollsTotal}/${game.world.scrollsTotal}  ·  Time bonus +${game.lastTimeBonus}  ·  Ghost bonus ${game.lastGhostBonus > 0 ? `+${game.lastGhostBonus}` : '—'}`, font: '18px sans-serif', color: '#ffd66e', gap: 40 },
+    { text: `Score ${game.score}`, font: 'bold 24px sans-serif', color: '#e8ecf5', gap: 60 },
+    { text: game.levelIndex + 1 < 3 ? 'Press Enter for the next level' : 'Press Enter to see your haul', font: 'bold 22px sans-serif', color: '#7dff9a', gap: 40 },
+  ]);
+}
+
+export function drawCaught(ctx, game) {
+  overlay(ctx, 0.55);
+  centreText(ctx, [
+    { text: 'CAUGHT!', font: 'bold 64px Georgia, serif', color: '#ff4d4d', gap: 80 },
+    { text: 'A lantern found the courier.', font: '20px sans-serif', color: '#c6d0e4', gap: 46 },
+    { text: game.lives > 0 ? `Lives left: ${game.lives}` : 'No lives left.', font: '18px sans-serif', color: '#ffd66e', gap: 56 },
+    { text: game.lives > 0 ? 'Press Enter to try again' : 'Press Enter to see the end', font: 'bold 22px sans-serif', color: '#7dff9a', gap: 40 },
+  ]);
+}
+
+export function drawWin(ctx, game) {
+  overlay(ctx, 0.6);
+  centreText(ctx, [
+    { text: 'THE VAULT IS YOURS', font: 'bold 54px Georgia, serif', color: '#ffd66e', gap: 70 },
+    { text: 'Every scroll delivered. No alarm that mattered.', font: '20px sans-serif', color: '#c6d0e4', gap: 46 },
+    { text: `Final score ${game.score}  ·  Total time ${formatTime(game.totalTime)}`, font: 'bold 22px sans-serif', color: '#e8ecf5', gap: 44 },
+    { text: `Ghost levels: ${game.ghostLevels}/3`, font: '18px sans-serif', color: '#7dff9a', gap: 60 },
+    { text: 'Press Enter to play again', font: 'bold 22px sans-serif', color: '#7dff9a', gap: 40 },
+  ]);
+}
+
+export function drawGameOver(ctx, game) {
+  overlay(ctx, 0.65);
+  centreText(ctx, [
+    { text: 'THE NIGHT CLOSES IN', font: 'bold 52px Georgia, serif', color: '#ff4d4d', gap: 70 },
+    { text: 'The courier was caught one time too many.', font: '20px sans-serif', color: '#c6d0e4', gap: 46 },
+    { text: `Score ${game.score}`, font: 'bold 22px sans-serif', color: '#e8ecf5', gap: 60 },
+    { text: 'Press Enter to try from the first level', font: 'bold 22px sans-serif', color: '#7dff9a', gap: 40 },
+  ]);
+}
+
+export function drawFrame(ctx, game) {
   ctx.clearRect(0, 0, VIEW_W, VIEW_H);
-  ctx.fillStyle = '#0a0d16';
+  ctx.fillStyle = '#0a0e1a';
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-
-  drawFloor(ctx, world);
-  const scrollsTotal = world.scrolls.length;
-  const scrollsGot = world.scrolls.filter((s) => s.taken).length;
-  drawExit(ctx, world, scrollsGot === scrollsTotal, time);
-  for (const s of world.scrolls) drawScroll(ctx, s, time);
-
-  // Vision cones first, then the bodies that cast them.
-  for (const g of guards) drawVisionCone(ctx, world, g);
-  for (const g of guards) drawGuard(ctx, g, time);
-  drawPlayer(ctx, player, time);
-  drawNoiseRing(ctx, player, game.noiseRadius);
-
-  // Red edge vignette while a guard chases the courier.
-  const alert = game.alertLevel;
-  if (alert === 2) {
-    const grad = ctx.createRadialGradient(
-      VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.35,
-      VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.75,
-    );
-    grad.addColorStop(0, 'rgba(255,40,40,0)');
-    grad.addColorStop(1, 'rgba(255,40,40,0.35)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  drawWorld(ctx, game);
+  for (const s of game.world.scrolls) {
+    if (!s.taken) drawScroll(ctx, s, game.time);
   }
-
-  drawHUD(ctx, {
-    level,
-    scrollsGot,
-    scrollsTotal,
-    lives,
-    score,
-    time: levelTime,
-    alert,
-  });
-
-  if (phase === 'title') {
-    overlayPanel(
-      ctx,
-      'NIGHTSHADE',
-      [
-        'Shadow Courier — a stealth game',
-        'Sneak past the lantern guards, gather every scroll,',
-        'then slip out the green door unseen.',
-        'Move: WASD / arrows / click   Sneak: hold Shift',
-        'Pause: P    Restart: R    Mute: M',
-      ],
-      '#c9b8ff',
-    );
-  } else if (phase === 'intro') {
-    overlayPanel(ctx, level.name, [level.hint, `Par time ${level.par}s — beat it for a time bonus.`], '#ffd34d');
-  } else if (phase === 'paused') {
-    overlayPanel(ctx, 'PAUSED', ['Take a breath. The guards wait for no one.', 'P to resume · R to restart the level'], '#9aa5bd');
-  } else if (phase === 'caught') {
-    overlayPanel(
-      ctx,
-      'CAUGHT!',
-      ['A lantern found you in the dark.', `Lives left: ${lives}`],
-      '#ff5a4d',
-    );
-  } else if (phase === 'clear') {
-    overlayPanel(
-      ctx,
-      'LEVEL CLEAR',
-      [
-        `All scrolls gathered — the courier vanishes into the night.`,
-        `Level score ${game.levelScore} · Total ${score}`,
-      ],
-      '#39d67a',
-    );
-  } else if (phase === 'win') {
-    overlayPanel(
-      ctx,
-      'THE VAULT IS YOURS',
-      [
-        'Every scroll stolen, every guard outwitted.',
-        `Final score ${score} · Time ${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, '0')}`,
-        game.ghostRun ? 'GHOST RUN — never spotted once. Flawless.' : 'Spotted along the way — try a ghost run next time.',
-      ],
-      '#ffd34d',
-    );
-  }
+  drawExit(ctx, game.world, game.time);
+  drawGuards(ctx, game);
+  drawPlayer(ctx, game);
+  drawParticles(ctx, game);
+  drawHUD(ctx, game);
+  if (game.phase === 'title') drawTitle(ctx, game);
+  else if (game.phase === 'intro') drawIntro(ctx, game);
+  else if (game.phase === 'paused') drawPaused(ctx);
+  else if (game.phase === 'levelclear') drawLevelClear(ctx, game);
+  else if (game.phase === 'caught') drawCaught(ctx, game);
+  else if (game.phase === 'win') drawWin(ctx, game);
+  else if (game.phase === 'gameover') drawGameOver(ctx, game);
 }

@@ -1,83 +1,94 @@
-// Deterministic screenshot states for Nightshade.
-// The page reads ?shot=start|play|alert|end&seed=N and poses the game so
-// a screenshot shows the real game at its best: the title over the level,
-// a tense sneak past a vision cone, a full chase, and the level-clear
-// screen. Positions are fixed, so the same URL always renders the same
-// frame (the seed only nudges the decorative fireflies).
+// Nightshade — Shadow Courier: screenshot poses. ?shot= freezes a posed
+// frame so the four dossier screenshots are real renders of the game:
+//   start — the title screen
+//   play  — mid-level, courier sneaking past a suspicious guard
+//   alert — a chase in progress, SPOTTED in the HUD
+//   end   — the level-clear screen with the exit open
+// Poses use the same fixed seed as a fresh game, so they are deterministic.
 
 import { TILE } from './config.js';
 
-function placeGuard(game, index, tx, ty, facing, state, suspicion) {
-  const g = game.guards[index];
-  if (!g) return;
-  g.x = (tx + 0.5) * TILE;
-  g.y = (ty + 0.5) * TILE;
-  g.facing = facing;
-  g.state = state;
-  g.suspicion = suspicion;
-  g.lastSeen = { x: game.player.x, y: game.player.y };
-}
-
-function placePlayer(game, tx, ty, facing) {
-  game.player.x = (tx + 0.5) * TILE;
-  game.player.y = (ty + 0.5) * TILE;
-  game.player.facing = facing;
-  game.player.target = null;
-}
-
-export function applyShot(game, shot, seed) {
-  // Start from level 1 in its opening pose for every shot.
-  game.loadLevel(0);
-  game.time = 12.5 + (seed % 5);
-  game.levelTime = 34;
-  game.score = 150;
-
-  if (shot === 'start') {
+export function applyShot(game, name) {
+  if (name === 'start') {
     game.phase = 'title';
-    placeGuard(game, 0, 16, 5, Math.PI / 2, 'patrol', 0);
-    placeGuard(game, 1, 11, 13, 0, 'patrol', 0);
-    placePlayer(game, 1, 1, 0);
+    game.frozen = true;
     return;
   }
-
-  if (shot === 'play') {
-    game.phase = 'play';
-    // One scroll already pocketed; the courier crouches behind a crate
-    // while a guard's cone sweeps past, a second guard closing in.
+  if (name === 'play') {
+    game.loadLevel(0);
+    game.phase = 'playing';
+    game.frozen = true;
+    // Courier crouched in a bush, one scroll already taken.
+    game.player.x = 7 * TILE + TILE / 2;
+    game.player.y = 8 * TILE + TILE / 2;
+    game.player.sneaking = true;
+    game.player.facing = 0;
     game.world.scrolls[0].taken = true;
-    game.score = 150;
-    placePlayer(game, 4, 3, Math.PI / 2);
-    placeGuard(game, 0, 13, 5, Math.PI, 'patrol', 0);
-    placeGuard(game, 1, 8, 13, -Math.PI / 2, 'suspicious', 0.55);
-    game.alertLevel = 1; // frozen frame: the HUD reads the posed alert
-    game.guards[1].lastSeen = { x: (4 + 0.5) * TILE, y: (3 + 0.5) * TILE };
+    game.score = 100;
+    // First guard: suspicious, cone turned toward the courier.
+    const g = game.guards[0];
+    g.x = 10 * TILE + TILE / 2;
+    g.y = 6 * TILE + TILE / 2;
+    g.angle = Math.atan2(game.player.y - g.y, game.player.x - g.x);
+    g.state = 'suspicious';
+    g.suspicion = 0.62;
+    g.stateTimer = 0.5;
+    g.computeCone(game.world);
+    // Second guard keeps patrolling far away.
+    const g2 = game.guards[1];
+    g2.x = 20 * TILE + TILE / 2;
+    g2.y = 13 * TILE + TILE / 2;
+    g2.angle = Math.PI;
+    g2.computeCone(game.world);
+    game.levelTime = 34;
     return;
   }
-
-  if (shot === 'alert') {
-    game.phase = 'play';
+  if (name === 'alert') {
+    game.loadLevel(1);
+    game.phase = 'playing';
+    game.frozen = true;
+    // Courier caught in the open, guard in full chase right behind, with a
+    // clear line of sight down an open corridor so the red cone reads.
+    game.player.x = 5 * TILE + TILE / 2;
+    game.player.y = 14 * TILE + TILE / 2;
+    game.player.facing = -Math.PI / 2;
     game.world.scrolls[0].taken = true;
-    game.world.scrolls[1].taken = true;
-    game.score = 300;
-    // Full chase: the guard runs at the courier, cone burning red.
-    placePlayer(game, 6, 8, Math.PI);
-    placeGuard(game, 0, 10, 8, Math.PI, 'chase', 1);
-    placeGuard(game, 1, 14, 12, -Math.PI / 2, 'suspicious', 0.7);
-    game.alertLevel = 2; // frozen frame: the HUD reads SPOTTED!
+    game.score = 100;
+    const g = game.guards[1];
+    g.x = 5 * TILE + TILE / 2;
+    g.y = 11 * TILE + TILE / 2;
+    g.angle = Math.PI / 2;
+    g.state = 'chase';
+    g.suspicion = 1;
+    g.lastSeen = { x: game.player.x, y: game.player.y };
+    g.computeCone(game.world);
+    const g2 = game.guards[0];
+    g2.x = 5 * TILE + TILE / 2;
+    g2.y = 5 * TILE + TILE / 2;
+    g2.angle = 0;
+    g2.state = 'suspicious';
+    g2.suspicion = 0.5;
+    g2.computeCone(game.world);
+    game.spottedThisLevel = true;
+    game.levelTime = 61;
     return;
   }
-
-  if (shot === 'end') {
-    game.phase = 'clear';
+  if (name === 'end') {
+    game.loadLevel(0);
+    game.phase = 'levelclear';
+    game.frozen = true;
     for (const s of game.world.scrolls) s.taken = true;
-    game.score = 950;
-    game.levelScore = 800;
-    placePlayer(game, 28, 9, 0);
-    placeGuard(game, 0, 16, 5, Math.PI / 2, 'patrol', 0);
-    placeGuard(game, 1, 11, 13, 0, 'patrol', 0);
+    game.player.x = game.world.exit.x - 80;
+    game.player.y = game.world.exit.y;
+    game.player.facing = 0;
+    for (const g of game.guards) g.computeCone(game.world);
+    game.score = 730; // 3 scrolls (300) + time bonus 180 + ghost bonus 250
+    game.lastTimeBonus = 180;
+    game.lastGhostBonus = 250;
+    game.levelTime = 58;
     return;
   }
-
-  // Unknown shot name: leave the title screen up.
+  // Unknown shot name: fall back to the title screen.
   game.phase = 'title';
+  game.frozen = true;
 }

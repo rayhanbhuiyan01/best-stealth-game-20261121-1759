@@ -1,98 +1,115 @@
-// Synthesized sound for Nightshade: no audio files, everything is made
-// with the Web Audio API the first time the player interacts with the page.
-// A soft pluck for a scroll, a low alarm swell while chased, a warm chord
-// for clearing a level and a dull thud for being caught.
+// Nightshade — Shadow Courier: all sound is synthesized with WebAudio.
+// No audio files, no network. The context is created lazily on the first
+// sound so a page that never gets a gesture stays silent and error-free.
 
-export function makeAudio() {
-  let ctx = null;
-  let muted = false;
-  let alarmNodes = null;
+export class SoundBank {
+  constructor() {
+    this.ctx = null;
+    this.master = null;
+    this.muted = false;
+  }
 
-  function ensure() {
-    if (!ctx) {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return null;
-      ctx = new AC();
+  ensure() {
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+      return true;
     }
-    if (ctx.state === 'suspended') ctx.resume();
-    return ctx;
+    try {
+      const AC = window.AudioContext ?? window.webkitAudioContext;
+      if (!AC) return false;
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.5;
+      this.master.connect(this.ctx.destination);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  function tone(freq, dur, type, gain, when = 0, slideTo = null) {
-    const ac = ensure();
-    if (!ac || muted) return;
-    const t0 = ac.currentTime + when;
-    const osc = ac.createOscillator();
-    const g = ac.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, t0);
-    if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t0 + dur);
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(gain, t0 + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.connect(g);
-    g.connect(ac.destination);
-    osc.start(t0);
-    osc.stop(t0 + dur + 0.05);
+  setMuted(muted) {
+    this.muted = muted;
+    if (this.master) this.master.gain.value = muted ? 0 : 0.5;
   }
 
-  return {
-    unlock() {
-      ensure();
-    },
-    setMuted(m) {
-      muted = m;
-      if (m) this.stopAlarm();
-    },
-    pickup() {
-      tone(660, 0.16, 'sine', 0.12);
-      tone(990, 0.22, 'sine', 0.1, 0.07);
-    },
-    step() {
-      tone(140, 0.05, 'triangle', 0.03);
-    },
-    spotted() {
-      tone(220, 0.3, 'sawtooth', 0.08, 0, 330);
-    },
-    caught() {
-      tone(160, 0.5, 'sawtooth', 0.14, 0, 55);
-      tone(90, 0.6, 'triangle', 0.12, 0.05, 40);
-    },
-    clear() {
-      tone(523, 0.25, 'sine', 0.11);
-      tone(659, 0.25, 'sine', 0.11, 0.12);
-      tone(784, 0.4, 'sine', 0.12, 0.24);
-    },
-    startAlarm() {
-      const ac = ensure();
-      if (!ac || muted || alarmNodes) return;
-      const osc = ac.createOscillator();
-      const g = ac.createGain();
-      const lfo = ac.createOscillator();
-      const lfoGain = ac.createGain();
-      osc.type = 'sawtooth';
-      osc.frequency.value = 196;
-      lfo.type = 'sine';
-      lfo.frequency.value = 2.2;
-      lfoGain.gain.value = 40;
-      lfo.connect(lfoGain);
-      lfoGain.connect(osc.frequency);
-      g.gain.value = 0.035;
-      osc.connect(g);
-      g.connect(ac.destination);
-      osc.start();
-      lfo.start();
-      alarmNodes = { osc, lfo, g };
-    },
-    stopAlarm() {
-      if (!alarmNodes) return;
-      try {
-        alarmNodes.osc.stop();
-        alarmNodes.lfo.stop();
-      } catch (e) {
-        // Already stopped; nothing to do.
+  tone(freq, dur, type, vol, slideTo) {
+    if (this.muted || !this.ensure()) return;
+    try {
+      const t0 = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t0);
+      if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t0 + dur);
+      gain.gain.setValueAtTime(vol, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(t0);
+      osc.stop(t0 + dur + 0.02);
+    } catch {
+      // Sound is garnish; a failed note never breaks the game.
+    }
+  }
+
+  thump(vol) {
+    if (this.muted || !this.ensure()) return;
+    try {
+      const t0 = this.ctx.currentTime;
+      const dur = 0.07;
+      const buffer = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * dur), this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
       }
-      alarmNodes = null;
-    },
-  };
+      const src = this.ctx.createBufferSource();
+      src.buffer = buffer;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 320;
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(vol, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      src.start(t0);
+    } catch {
+      // Ignore.
+    }
+  }
+
+  footstep(sneaking) {
+    this.thump(sneaking ? 0.05 : 0.16);
+  }
+
+  pickup() {
+    this.tone(660, 0.12, 'sine', 0.25);
+    setTimeout(() => this.tone(880, 0.2, 'sine', 0.25), 90);
+  }
+
+  // Fired once when a guard first spots the courier, never every frame.
+  alert() {
+    this.tone(196, 0.45, 'sawtooth', 0.3, 98);
+    setTimeout(() => this.tone(147, 0.4, 'sawtooth', 0.22, 73), 120);
+  }
+
+  caught() {
+    this.tone(330, 0.3, 'square', 0.2, 110);
+    setTimeout(() => this.tone(220, 0.5, 'square', 0.18, 55), 180);
+  }
+
+  win() {
+    const notes = [523, 659, 784, 1047];
+    notes.forEach((f, i) => setTimeout(() => this.tone(f, 0.28, 'triangle', 0.25), i * 130));
+  }
+
+  levelClear() {
+    const notes = [523, 659, 784];
+    notes.forEach((f, i) => setTimeout(() => this.tone(f, 0.22, 'triangle', 0.22), i * 110));
+  }
+
+  uiClick() {
+    this.tone(520, 0.06, 'sine', 0.15);
+  }
 }

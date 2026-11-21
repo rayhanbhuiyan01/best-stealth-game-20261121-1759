@@ -1,138 +1,122 @@
-// Nightshade — Shadow Courier: level data and tuning knobs.
-// A level map is one character per tile:
-//   # wall (blocks movement and sight)   . floor
-//   B bush (cover: you are hidden inside)  C crate (blocks movement and sight)
-//   S scroll (loot)   E exit door   P player start
-// Guards walk the waypoint lists in tile coordinates. All art is drawn in
-// code; there are no image, font or sound files to load.
+// Nightshade — Shadow Courier: tuning numbers and the three level layouts.
+// Map legend: '#' wall, '.' floor, 'B' bush (hides the courier), 'C' crate
+// (blocks movement and sight), 'S' scroll, 'P' courier start, 'E' exit door.
 
 export const TILE = 40;
-export const VIEW_W = 1280;
-export const VIEW_H = 800;
+export const COLS = 32;
+export const ROWS = 20;
+export const VIEW_W = COLS * TILE; // 1280
+export const VIEW_H = ROWS * TILE; // 800
 
-export const PLAYER = {
-  radius: 13,
-  walkSpeed: 148, // pixels per second
-  sneakSpeed: 78,
-  noiseRadiusWalk: 150, // guards hear running feet inside this range
-  noiseRadiusSneak: 26,
-};
-
-export const GUARD = {
-  radius: 14,
-  patrolSpeed: 62,
-  chaseSpeed: 128,
-  searchSpeed: 70,
-  viewDistance: 235,
-  viewAngle: 1.15, // radians, half-angle of the vision cone
-  suspicionPerSecond: 1.15, // how fast the alert meter fills while seen
-  suspicionDecay: 0.45, // how fast it drains while unseen
-  catchDistance: 26,
-  hearRadius: 150,
-};
+export const WALK_SPEED = 155; // pixels per second, running
+export const SNEAK_SPEED = 88; // pixels per second, holding Shift
+export const GUARD_PATROL_SPEED = 64;
+export const GUARD_CHASE_SPEED = 138;
+export const GUARD_SEARCH_SPEED = 84;
+export const VISION_RANGE = 268;
+export const VISION_HALF_ANGLE = (Math.PI / 180) * 38; // about a 76 degree cone
+export const NOISE_RADIUS = 155; // running footsteps carry this far
+export const BUSH_HIDE_RANGE = 72; // a guard must be this close to spot a courier in a bush
+export const MAX_LIVES = 3;
+export const SCROLL_POINTS = 100;
+export const GHOST_BONUS = 250; // clearing a level without ever being spotted
+export const CATCH_DISTANCE = 26;
 
 export const LEVELS = [
   {
-    name: '1 · The Rooftop Archive',
-    hint: 'Gather all 3 scrolls, then slip out the green door. Bushes and crates hide you.',
+    name: 'The Rooftop Archive',
+    sub: 'Level 1 — two lantern guards walk the stacks. Slip past, take 3 scrolls.',
     par: 75,
     map: [
       '################################',
-      '#P......#..........B.........#.#',
-      '#.......#..........B......S..#.#',
-      '#..C....#....C.............#...#',
-      '#.......#..........####...#...##',
-      '#..B....#..........#......#...##',
-      '#.......#..........#..C...#...##',
-      '#.......#####.######......#...##',
-      '#........................#...###',
-      '#..C......B.......C.......#E..##',
-      '#........................#...###',
-      '#.....####.....####.......#...##',
-      '#.....#..........#............##',
-      '#.....#....S.....#....B.......##',
-      '#.....#..........#............##',
-      '#..B..#....C.....#.....C......##',
-      '#.....#..........#............##',
-      '#.....#..........#......S.....##',
-      '#.....#..........#............##',
+      '#......B..........B...........#',
+      '#..P......C.......C.....S....#',
+      '#..........####..............#',
+      '#..B.......#..#......B.......#',
+      '#..........#..#.........C....#',
+      '#....C.....#..#....S.........#',
+      '#..........####.......B......#',
+      '#......B........C............#',
+      '#.............#####..........#',
+      '#.........C...#...#....B.....#',
+      '#.............#...#..........#',
+      '#....B........#####....C.....#',
+      '#......................S....#',
+      '#..C......B........C.........#',
+      '#..............B.............#',
+      '#...............#####........#',
+      '#..................#E#......#',
+      '#..B.......C.......#..#......#',
       '################################',
     ],
     guards: [
-      { patrol: [[14, 3], [14, 9], [20, 9], [20, 3]], speed: 62 },
-      { patrol: [[8, 15], [8, 13], [15, 13], [15, 15]], speed: 58 },
+      { waypoints: [[4, 2], [16, 2], [16, 6], [4, 6]] },
+      { waypoints: [[24, 10], [24, 16], [10, 16], [10, 9]] },
     ],
   },
   {
-    name: '2 · The Lantern Courtyard',
-    hint: 'Three lantern guards now. Sneak (hold Shift) to shrink your noise.',
-    par: 95,
+    name: 'The Lantern Courtyard',
+    sub: 'Level 2 — three guards cross the courtyard. Bushes are your friends.',
+    par: 90,
     map: [
       '################################',
-      '#P...B......#......B......S....#',
-      '#.......C...#..........C.......#',
-      '#..####.....#.....####.........#',
-      '#..#........#.....#............#',
-      '#..#...S....#..B..#....C....#.##',
-      '#..#........#.....#.........#..#',
-      '#..####..C..#.....####..B...#..#',
-      '#.............................##',
-      '#..B.......####.......C....#...#',
-      '#......C...#..#...........#....#',
-      '#..........#..#...S.......#..E.#',
-      '#..####....#..#...........#....#',
-      '#..#.......#..#....####...#....#',
-      '#..#...B...#..#....#..........##',
-      '#..#.......#..#....#....C.....##',
-      '#..####....#..#....#..........##',
-      '#......C...#..#....#.....B....##',
-      '#..........#..#....#..........##',
+      '#..B........C...........B.....#',
+      '#......S.......####..........#',
+      '#..P....C......#..#....C.....#',
+      '#..............#..#......S...#',
+      '#..B.....####..#..#..........#',
+      '#..........#...####....B.....#',
+      '#....C.....#..........C......#',
+      '#..........#####.............#',
+      '#.......B........C......B....#',
+      '#.............C.....####.....#',
+      '#..C......B.........#..#.....#',
+      '#..................#..#.....#',
+      '#......C......B.....####.....#',
+      '#............................#',
+      '#..B......S......C.......B...#',
+      '#..........####..............#',
+      '#..C......#....#......C......#',
+      '#.........#.E..#....B.......#',
       '################################',
     ],
     guards: [
-      { patrol: [[5, 8], [14, 8], [14, 2], [5, 2]], speed: 66 },
-      { patrol: [[24, 4], [24, 12], [17, 12], [17, 4]], speed: 62 },
-      { patrol: [[9, 16], [9, 10], [16, 10], [16, 16]], speed: 60 },
+      { waypoints: [[5, 3], [14, 3], [14, 7], [6, 7]] },
+      { waypoints: [[24, 4], [24, 12], [10, 12], [10, 4]] },
+      { waypoints: [[6, 16], [26, 16], [26, 9], [6, 9]] },
     ],
   },
   {
-    name: '3 · The Vault of Echoes',
-    hint: 'Four guards, long sightlines. Use the bushes — a guard must be very close to spot you in one.',
-    par: 120,
+    name: 'The Vault of Echoes',
+    sub: 'Level 3 — four guards, tight halls. One mistake and the vault wakes.',
+    par: 110,
     map: [
       '################################',
-      '#P....B.....##.....B.......S...#',
-      '#.....C.....##..........C......#',
-      '#..####.....##....####.........#',
-      '#..#........##....#.......B....#',
-      '#..#...S....##.B..#....C....#..#',
-      '#..#........##....#.........#..#',
-      '#..####..C..##....####..B...#..#',
-      '#.............................##',
-      '#..B.......####.......C....#...#',
-      '#......C...#..#....B......#....#',
-      '#..........#..#...........#..E.#',
-      '#..####....#..#....S......#....#',
-      '#..#.......#..#...........#....#',
-      '#..#...B...#..#....####...#....#',
-      '#..#.......#..#....#..........##',
-      '#..####....#..#....#.....C....##',
-      '#......C...#..#....#.....B....##',
-      '#..........#..#....#..........##',
+      '#..B.....C..........B......S..#',
+      '#........####.....C..........#',
+      '#..P.....#..#..........C.....#',
+      '#........#..#....B......#....#',
+      '#..C.....#..#.........##.....#',
+      '#........####....S....#..B...#',
+      '#..B..........C.......#......#',
+      '#.......#####......C.........#',
+      '#.......#...#....B......C....#',
+      '#........#...#...........#...#',
+      '#..C.....#####....S......#...#',
+      '#....................####...#',
+      '#..B......C.....B............#',
+      '#.........####........C......#',
+      '#..........#..#......B........#',
+      '#.........#..#....####.......#',
+      '#..C......#..#....#..#...E...#',
+      '#..B...........B...#..#......#',
       '################################',
     ],
     guards: [
-      { patrol: [[5, 8], [14, 8], [14, 2], [5, 2]], speed: 70 },
-      { patrol: [[24, 4], [24, 12], [17, 12], [17, 4]], speed: 66 },
-      { patrol: [[9, 16], [9, 10], [16, 10], [16, 16]], speed: 64 },
-      { patrol: [[26, 15], [26, 8], [20, 8], [20, 15]], speed: 62 },
+      { waypoints: [[5, 3], [13, 3], [12, 7], [5, 7]] },
+      { waypoints: [[22, 4], [22, 11], [14, 11], [14, 4]] },
+      { waypoints: [[6, 15], [20, 15], [20, 9], [6, 9]] },
+      { waypoints: [[26, 5], [26, 16], [16, 16], [16, 5]] },
     ],
   },
 ];
-
-export const SCORE = {
-  scroll: 150,
-  levelClear: 500,
-  timeBonusPerSecond: 10,
-  ghostBonus: 400, // finishing a level never seen at all
-};
