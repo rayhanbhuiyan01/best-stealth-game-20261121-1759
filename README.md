@@ -1,8 +1,8 @@
 # Nightshade — Shadow Courier
 
-[![make.fun bounty](https://img.shields.io/badge/make.fun-bounty-7c5cff)](https://make.fun/bounty/best-stealth-game-20261121-1759)
-[![make.fun entry](https://img.shields.io/badge/make.fun-entry-00c2a8)](https://make.fun/bounty/best-stealth-game-20261121-1759)
-[![Stealth game](https://img.shields.io/badge/game-stealth-ffb020)](https://make.fun/bounty/best-stealth-game-20261121-1759)
+[![make.fun · best-stealth-game-20261121-1759](https://make.fun/badge/best-stealth-game-20261121-1759.svg)](https://make.fun/bounty/best-stealth-game-20261121-1759?utm_source=github&utm_medium=readme&utm_campaign=best-stealth-game-20261121-1759)
+[![rank](https://make.fun/badge/best-stealth-game-20261121-1759/rayhanbhuiyan01/best-stealth-game-20261121-1759/rank.svg)](https://make.fun/bounty/best-stealth-game-20261121-1759/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=best-stealth-game-20261121-1759)
+[![reward](https://make.fun/badge/best-stealth-game-20261121-1759/rayhanbhuiyan01/best-stealth-game-20261121-1759/reward.svg)](https://make.fun/bounty/best-stealth-game-20261121-1759?utm_source=github&utm_medium=readme&utm_campaign=best-stealth-game-20261121-1759)
 
 A complete top-down 2D stealth game that runs offline in a desktop browser
 from its own files — no libraries, no network calls, no build step.
